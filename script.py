@@ -3,16 +3,20 @@ import re
 import os
 from mcap.writer import Writer
 
-# --- CONFIGURACIÓN ---
-CARPETA_ENTRADA = "./logs_crudos"
-CARPETA_SALIDA = "./logs_mcap"
+# --- CONFIGURATION ---
+input_folder = "./raw_logs"
+output_folder = "./mcap_logs"
 # ---------------------
 
 def candump_to_mcap(input_path, output_path):
+    """
+    Parses a candump text file and serializes it into an MCAP file.
+    """
     with open(output_path, "wb", buffering=1024*1024) as f:
         writer = Writer(f)
         writer.start()
 
+        # Register the JSON schema for CAN messages
         schema_id = writer.register_schema(
             name="can_msg",
             encoding="jsonschema",
@@ -26,13 +30,14 @@ def candump_to_mcap(input_path, output_path):
             }).encode()
         )
 
+        # Register the channel
         channel_id = writer.register_channel(
             topic="/can/raw",
             message_encoding="json",
             schema_id=schema_id,
         )
 
-        # Regex robusta
+        # Robust Regex for formats
         line_regex = re.compile(
             r"\((?P<time>\d+\.\d+)\)\s+(?P<iface>\S+)\s+(?P<id>[0-9A-F]+)\s+\[\d+\]\s+(?P<data>.+)",
             re.IGNORECASE
@@ -46,14 +51,14 @@ def candump_to_mcap(input_path, output_path):
 
                 groups = match.groupdict()
                 
-                # Extraemos los bytes limpiando cualquier residuo
-                # .split() separa por cualquier espacio, luego filtramos solo lo que parezca Hex
+                # Extract bytes and filter hex values
                 raw_parts = groups["data"].split()
                 byte_data = []
                 for part in raw_parts:
                     if len(part) <= 2 and all(c in "0123456789abcdefABCDEF" for c in part):
                         byte_data.append(int(part, 16))
 
+                # Convert seconds to nanoseconds for MCAP
                 timestamp_ns = int(float(groups["time"]) * 1e9)
                 
                 writer.add_message(
@@ -71,25 +76,30 @@ def candump_to_mcap(input_path, output_path):
 
 if __name__ == "__main__":
 
-    # Comprobar y crear carpeta de salida si no existe
-    if not os.path.exists(CARPETA_SALIDA):
-        os.makedirs(CARPETA_SALIDA)
-        print(f"Carpeta creada: {CARPETA_SALIDA}")
+    # Ensure output directory exists
+    if not os.path.exists(output_folder):
+        os.makedirs(output_folder)
+        print(f"Created output folder: {output_folder}")
 
-    # Comprobar y crear carpeta de entrada si no existe (para que no de error al listar)
-    if not os.path.exists(CARPETA_ENTRADA):
-        os.makedirs(CARPETA_ENTRADA)
-        print(f"Carpeta de entrada creada: {CARPETA_ENTRADA}. Mete .txt aquí para procesar.")
+    # Ensure input directory exists
+    if not os.path.exists(input_folder):
+        os.makedirs(input_folder)
+        print(f"Created input folder: {input_folder}. Place .txt logs here to process.")
     
-    archivos = [f for f in os.listdir(CARPETA_ENTRADA) if f.endswith((".txt", ".log"))]
-    for nombre_archivo in archivos:
-        print(f"Procesando {nombre_archivo}...", end="\r")
-        ruta_in = os.path.join(CARPETA_ENTRADA, nombre_archivo)
-        ruta_out = os.path.join(CARPETA_SALIDA, os.path.splitext(nombre_archivo)[0] + ".mcap")
+    # Process files
+    log_files = [f for f in os.listdir(input_folder) if f.endswith((".txt", ".log"))]
+    
+    if not log_files:
+        print("No log files found to process.")
+    else:
+        for filename in log_files:
+            print(f"Processing {filename}...", end="\r")
+            in_path = os.path.join(input_folder, filename)
+            out_path = os.path.join(output_folder, os.path.splitext(filename)[0] + ".mcap")
+            
+            try:
+                candump_to_mcap(in_path, out_path)
+            except Exception as e:
+                print(f"\n [ERROR] {filename}: {e}")
         
-        try:
-            candump_to_mcap(ruta_in, ruta_out)
-        except Exception as e:
-            print(f"\n [ERROR]{nombre_archivo}: {e}")
-    
-    print("\n Proceso completado.")
+        print("\nProcess completed successfully.")
